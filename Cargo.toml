@@ -1,0 +1,9 @@
+[package]
+name = "common"
+version = "0.3.0"
+edition = "2021"
+authors = ["Patrick Monaghan <0x5f.manpat@gmail.com>"]
+
+[dependencies]
+rand = "0.8"
+rand_derive2 = "0.1"
