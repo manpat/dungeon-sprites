@@ -1,5 +1,8 @@
 
-
+ 
+git subtree add -P common-rs git@github.com:manpat/common-rs.git master --squash
+git subtree add -P toy-rs git@github.com:manpat/toy-rs.git main --squash
+git subtree add -P toybox-rs git@github.com:manpat/toybox-rs.git main --squash
 
 
 
@@ -8,10 +11,10 @@ git remote add toy git@github.com:manpat/toy-rs.git
 git remote add toybox git@github.com:manpat/toybox-rs.git
 
 
-git subtree push -P common-rs common main
+git subtree push -P common-rs common master
 git subtree push -P toy-rs toy main
 git subtree push -P toybox-rs toybox main
 
-git subtree pull -P common-rs common main
+git subtree pull -P common-rs common master
 git subtree pull -P toy-rs toy main
 git subtree pull -P toybox-rs toybox main
