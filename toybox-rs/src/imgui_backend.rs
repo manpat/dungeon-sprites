@@ -432,7 +432,7 @@ fn init_imgui() {
 		if let Some(ctx) = ctx.get().as_mut() {
 			*ctx = Some({
 				let mut imgui = imgui::Context::create();
-				imgui.set_ini_filename(None);
+				// imgui.set_ini_filename(None);
 				imgui.set_log_filename(None);
 
 				// setup platform and renderer, and fonts to imgui
