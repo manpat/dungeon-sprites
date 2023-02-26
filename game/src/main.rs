@@ -35,11 +35,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 		ui.same_line();
 
 		ui.group(|| {
-			SpritePreview::new(atlas)
-				.widget_size(Vec2::splat(128.0))
-				.display_range(sprite_editor_state.selected_cell_begin, sprite_editor_state.selected_cell_end)
-				.background_color(sprite_editor_state.preview_background)
-				.build(ui);
+			ui_sprite_basic_preview(ui, atlas, &sprite_editor_state);
 
 			let mut editable_color = sprite_editor_state.preview_background.to_vec4().to_array();
 			if imgui::ColorEdit::new("Preview BG Color", &mut editable_color)
@@ -102,31 +98,24 @@ pub struct SpriteEditorState {
 pub struct Sprite {
 	name: String,
 
-	cell: Vec2i,
+	pixel_start: Vec2i,
+	pixel_end: Vec2i,
 }
 
 
 pub fn ui_atlas_editor(ui: &imgui::Ui<'_>, atlas: gfx::TextureKey, state: &mut SpriteEditorState) {
-	let available_size = ui.content_region_avail();
-	let widget_size = available_size[0].min(available_size[1]);
-	let widget_pos = Vec2::from(ui.cursor_screen_pos());
-
-	SpritePreview::new(atlas)
-		.selection_range(state.selected_cell_begin, state.selected_cell_end)
-		.background_color(state.preview_background)
+	let canvas = TextureCanvasBuilder::new(atlas)
 		.build(ui);
 
-	if !ui.is_item_hovered() {
-		return;
-	}
+	canvas.fill(state.preview_background);
+	canvas.draw_texture();
 
-	let draw_list = ui.get_window_draw_list();
+	// Draw Selection
+	canvas.draw_cell_rect(state.selected_cell_begin, state.selected_cell_end, Color::rgb(1.0, 0.2, 0.2));
 
-	let mouse_pos = ui.io().mouse_pos;
-	draw_list.add_circle(mouse_pos, 5.0, 0xff44ff44).build();
-
-	let diff = Vec2::from(mouse_pos) - widget_pos;
-	let hovered_cell = (diff / widget_size * 8.0).to_vec2i();
+	let Some(hovered_cell) = canvas.hovered_cell() else {
+		return
+	};
 
 	if ui.is_item_clicked() {
 		state.selected_cell_begin = hovered_cell;
@@ -140,35 +129,43 @@ pub fn ui_atlas_editor(ui: &imgui::Ui<'_>, atlas: gfx::TextureKey, state: &mut S
 		state.selected_cell_end = state.selected_cell_begin + cell_delta;
 	}
 
-	let hovered_cell = hovered_cell.to_vec2();
-	let cell_tl = hovered_cell / 8.0 * widget_size + widget_pos;
-	let cell_br = (hovered_cell + Vec2::splat(1.0)) / 8.0 * widget_size + widget_pos;
+	// Draw hovered cell
+	canvas.draw_cell_rect(hovered_cell, hovered_cell + Vec2i::splat(1), Color::grey_a(1.0, 0.5));
+}
 
-	draw_list.add_rect(cell_tl.to_array(), cell_br.to_array(), 0x88ffffff).build();
+
+pub fn ui_sprite_basic_preview(ui: &imgui::Ui<'_>, atlas: gfx::TextureKey, state: &SpriteEditorState) {
+	let canvas = TextureCanvasBuilder::new(atlas)
+		.widget_size(Vec2::splat(300.0))
+		.display_range(state.selected_cell_begin * 16, state.selected_cell_end * 16)
+		.build(ui);
+
+	canvas.fill(state.preview_background);
+	if canvas.is_empty() {
+		return;
+	}
+
+	canvas.draw_texture();
 }
 
 
 
-pub struct SpritePreview {
+
+const TEX_SIZE: f32 = 128.0;
+
+
+pub struct TextureCanvasBuilder {
 	atlas: gfx::TextureKey,
-
 	widget_size: Option<Vec2>,
-
 	display_range: Option<(Vec2i, Vec2i)>,
-	selection_range: Option<(Vec2i, Vec2i)>,
-
-	bg_color: Color,
 }
 
-
-impl SpritePreview {
+impl TextureCanvasBuilder {
 	pub fn new(atlas: gfx::TextureKey) -> Self {
-		SpritePreview {
+		TextureCanvasBuilder {
 			atlas,
 			widget_size: None,
 			display_range: None,
-			selection_range: None,
-			bg_color: Color::black(),
 		}
 	}
 
@@ -182,19 +179,9 @@ impl SpritePreview {
 		self
 	}
 
-	pub fn selection_range(mut self, start: Vec2i, end: Vec2i) -> Self {
-		self.selection_range = Some((start, end));
-		self
-	}
-
-	pub fn background_color(mut self, color: Color) -> Self {
-		self.bg_color = color;
-		self
-	}
-
-	pub fn build(self, ui: &imgui::Ui<'_>) {
-		let (display_tl, display_br) = match self.display_range {
-			Some((start, end)) => (start.to_vec2() / 8.0, end.to_vec2() / 8.0),
+	pub fn build<'imgui>(self, ui: &'imgui imgui::Ui<'_>) -> TextureCanvas<'imgui> {
+		let (uv_start, uv_end) = match self.display_range {
+			Some((start, end)) => (start.to_vec2() / TEX_SIZE, end.to_vec2() / TEX_SIZE),
 			None => (Vec2::zero(), Vec2::splat(1.0)),
 		};
 
@@ -208,25 +195,56 @@ impl SpritePreview {
 			}
 		};
 
-		let widget_pos = Vec2::from(ui.cursor_screen_pos());
-		let widget_end = widget_pos + widget_size;
+		let widget_start = Vec2::from(ui.cursor_screen_pos());
+		let widget_end = widget_start + widget_size;
 
-		ui.invisible_button("Sprite preview", widget_size.to_array());
+		ui.invisible_button("Texture canvas", widget_size.to_array());
 
-		let draw_list = ui.get_window_draw_list();
+		TextureCanvas {
+			ui,
+			draw_list: ui.get_window_draw_list(),
 
-		// Background
-		draw_list.add_rect(widget_pos.to_array(), widget_end.to_array(), self.bg_color.to_tuple())
+			atlas: self.atlas,
+
+			widget_start,
+			widget_end,
+			widget_size,
+
+			uv_start,
+			uv_end,
+		}
+	}
+}
+
+
+
+pub struct TextureCanvas<'imgui> {
+	ui: &'imgui imgui::Ui<'imgui>,
+	draw_list: imgui::draw_list::DrawListMut<'imgui>,
+
+	atlas: gfx::TextureKey,
+
+	widget_start: Vec2,
+	widget_end: Vec2,
+	widget_size: Vec2,
+	
+	uv_start: Vec2,
+	uv_end: Vec2,
+}
+
+impl TextureCanvas<'_> {
+	pub fn is_empty(&self) -> bool {
+		let Vec2{x, y} = self.uv_end - self.uv_start;
+		x < 0.001 || y < 0.001
+	}
+
+	pub fn fill(&self, color: Color) {
+		self.draw_list.add_rect(self.widget_start.to_array(), self.widget_end.to_array(), color.to_tuple())
 			.filled(true)
 			.build();
+	}
 
-
-		let display_size = display_br - display_tl;
-		if (display_size.x.abs() < 0.01) || (display_size.y.abs() < 0.01) {
-			return;
-		}
-
-
+	pub fn draw_texture(&self) {
 		fn flip_y(uv: Vec2) -> Vec2 {
 			Vec2 {
 				y: 1.0 - uv.y,
@@ -234,29 +252,53 @@ impl SpritePreview {
 			}
 		}
 
-		// Draw preview
 		let texture_id = toybox::imgui_backend::texture_key_to_imgui_id(self.atlas);
-		draw_list.add_image(texture_id, widget_pos.to_array(), widget_end.to_array())
-			.uv_min(flip_y(display_tl).to_array())
-			.uv_max(flip_y(display_br).to_array())
+		self.draw_list.add_image(texture_id, self.widget_start.to_array(), self.widget_end.to_array())
+			.uv_min(flip_y(self.uv_start).to_array())
+			.uv_max(flip_y(self.uv_end).to_array())
 			.build();
+	}
 
-		// Draw selection
-		if let Some((cell_tl, cell_br)) = self.selection_range
-			&& cell_tl != cell_br
-		{
-			let norm_tl = cell_tl.to_vec2() / 8.0;
-			let norm_br = cell_br.to_vec2() / 8.0;
+	pub fn draw_cell_rect(&self, start_cell: Vec2i, end_cell: Vec2i, color: impl Into<Color>) {
+		self.draw_pixel_rect(start_cell * 16, end_cell * 16, color);
+	}
 
-			let norm_tl = (norm_tl - display_tl) / (display_br - display_tl);
-			let norm_br = (norm_br - display_tl) / (display_br - display_tl);
-
-			let widget_tl = norm_tl * widget_size + widget_pos;
-			let widget_br = norm_br * widget_size + widget_pos;
-
-			draw_list.with_clip_rect_intersect(widget_pos.to_array(), widget_end.to_array(), || {
-				draw_list.add_rect(widget_tl.to_array(), widget_br.to_array(), 0xff4444ff).build();
-			});
+	pub fn draw_pixel_rect(&self, start_px: Vec2i, end_px: Vec2i, color: impl Into<Color>) {
+		if start_px == end_px {
+			return;
 		}
+
+		let color = color.into();
+
+		let start_norm = start_px.to_vec2() / TEX_SIZE;
+		let end_norm = end_px.to_vec2() / TEX_SIZE;
+
+		let uv_size = self.uv_end - self.uv_start;
+		let start_viewport = (start_norm - self.uv_start) / uv_size;
+		let end_viewport = (end_norm - self.uv_start) / uv_size;
+
+		let start_widget = start_viewport * self.widget_size + self.widget_start;
+		let end_widget = end_viewport * self.widget_size + self.widget_start;
+
+		self.draw_list.with_clip_rect_intersect(self.widget_start.to_array(), self.widget_end.to_array(), || {
+			self.draw_list.add_rect(start_widget.to_array(), end_widget.to_array(), color.to_tuple()).build();
+		});
+	}
+
+	pub fn hovered_pixel(&self) -> Option<Vec2i> {
+		if !self.ui.is_item_hovered() {
+			return None;
+		}
+
+		let mouse_pos = self.ui.io().mouse_pos;
+
+		let diff = Vec2::from(mouse_pos) - self.widget_start;
+		let hovered_pixel = (diff * TEX_SIZE / self.widget_size).to_vec2i();
+		Some(hovered_pixel)
+	}
+
+	pub fn hovered_cell(&self) -> Option<Vec2i> {
+		self.hovered_pixel()
+			.map(|pos_px| pos_px / 16)
 	}
 }
