@@ -1,6 +1,7 @@
 use crate::vector::Vec3;
 
 #[derive(Copy, Clone, Debug)]
+#[cfg_attr(feature="serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Plane {
 	pub normal: Vec3,
 	pub length: f32,

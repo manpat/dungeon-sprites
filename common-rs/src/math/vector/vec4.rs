@@ -4,6 +4,7 @@ use rand_derive2::RandGen;
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, RandGen)]
+#[cfg_attr(feature="serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Vec4 {
 	pub x: f32,
 	pub y: f32,

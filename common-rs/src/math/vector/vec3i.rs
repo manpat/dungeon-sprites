@@ -3,7 +3,8 @@ use rand_derive2::RandGen;
 
 
 #[repr(C)]
-#[derive(Copy, Clone, Debug, PartialEq, RandGen)]
+#[derive(Copy, Clone, Debug, PartialEq, Hash, RandGen)]
+#[cfg_attr(feature="serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Vec3i {
 	pub x: i32,
 	pub y: i32,

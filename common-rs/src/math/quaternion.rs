@@ -5,6 +5,7 @@ use crate::lerp::Lerp;
 use std::f32::consts::PI;
 
 #[derive(Copy, Clone, Debug)]
+#[cfg_attr(feature="serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Quat {
 	pub x: f32,
 	pub y: f32,

@@ -3,6 +3,7 @@ use crate::math::Lerp;
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug)]
+#[cfg_attr(feature="serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Color {
 	pub r: f32,
 	pub g: f32,
