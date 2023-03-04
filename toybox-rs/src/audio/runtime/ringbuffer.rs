@@ -325,7 +325,7 @@ mod test {
 	fn empty_read() {
 		let ringbuffer = new_buffer();
 		let lock = ringbuffer.lock_for_read(5);
-		assert!(lock.is_empty());
+		assert!(lock.len() == 0);
 		drop(lock);
 
 		assert_eq!(ringbuffer.write_ptr.load(Ordering::Relaxed), 0);
