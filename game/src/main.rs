@@ -158,7 +158,7 @@ const TEX_SIZE: f32 = 128.0;
 
 pub struct TextureCanvasBuilder {
 	atlas: gfx::TextureKey,
-	widget_size: Option<Vec2>,
+	widget_size_px: Option<Vec2>,
 	display_range: Option<Aabb2i>,
 }
 
@@ -166,13 +166,13 @@ impl TextureCanvasBuilder {
 	pub fn new(atlas: gfx::TextureKey) -> Self {
 		TextureCanvasBuilder {
 			atlas,
-			widget_size: None,
+			widget_size_px: None,
 			display_range: None,
 		}
 	}
 
 	pub fn widget_size(mut self, size: Vec2) -> Self {
-		self.widget_size = Some(size);
+		self.widget_size_px = Some(size);
 		self
 	}
 
@@ -189,7 +189,7 @@ impl TextureCanvasBuilder {
 
 		// let aspect = ...
 
-		let widget_size = match self.widget_size {
+		let widget_size_px = match self.widget_size_px {
 			Some(size) => size,
 			None => {
 				let [w, h] = ui.content_region_avail();
@@ -198,9 +198,9 @@ impl TextureCanvasBuilder {
 		};
 
 		let widget_start = Vec2::from(ui.cursor_screen_pos());
-		let widget_end = widget_start + widget_size;
+		let widget_end = widget_start + widget_size_px;
 
-		ui.invisible_button("Texture canvas", widget_size.to_array());
+		ui.invisible_button("Texture canvas", widget_size_px.to_array());
 
 		TextureCanvas {
 			ui,
@@ -208,10 +208,7 @@ impl TextureCanvasBuilder {
 
 			atlas: self.atlas,
 
-			widget_start,
-			widget_end,
-			widget_size,
-
+			widget_bounds: Aabb2::new(widget_start, widget_end),
 			uv_range,
 		}
 	}
@@ -225,10 +222,7 @@ pub struct TextureCanvas<'imgui> {
 
 	atlas: gfx::TextureKey,
 
-	widget_start: Vec2,
-	widget_end: Vec2,
-	widget_size: Vec2,
-	
+	widget_bounds: Aabb2,
 	uv_range: Aabb2,
 }
 
@@ -239,7 +233,7 @@ impl TextureCanvas<'_> {
 	}
 
 	pub fn fill(&self, color: Color) {
-		self.draw_list.add_rect(self.widget_start.to_array(), self.widget_end.to_array(), color.to_tuple())
+		self.draw_list.add_rect(self.widget_bounds.min.to_array(), self.widget_bounds.max.to_array(), color.to_tuple())
 			.filled(true)
 			.build();
 	}
@@ -253,14 +247,14 @@ impl TextureCanvas<'_> {
 		}
 
 		let texture_id = toybox::imgui_backend::texture_key_to_imgui_id(self.atlas);
-		self.draw_list.add_image(texture_id, self.widget_start.to_array(), self.widget_end.to_array())
+		self.draw_list.add_image(texture_id, self.widget_bounds.min.to_array(), self.widget_bounds.max.to_array())
 			.uv_min(flip_y(self.uv_range.min).to_array())
 			.uv_max(flip_y(self.uv_range.max).to_array())
 			.build();
 	}
 
 	pub fn draw_cell_rect(&self, cell_range: Aabb2i, color: impl Into<Color>) {
-		self.draw_pixel_rect(Aabb2i::new(cell_range.min * 16, cell_range.max * 16), color);
+		self.draw_pixel_rect(cell_range.scale(16), color);
 	}
 
 	pub fn draw_pixel_rect(&self, pixel_range: Aabb2i, color: impl Into<Color>) {
@@ -273,14 +267,13 @@ impl TextureCanvas<'_> {
 		let start_norm = pixel_range.min.to_vec2() / TEX_SIZE;
 		let end_norm = pixel_range.max.to_vec2() / TEX_SIZE;
 
-		let uv_size = self.uv_range.size();
-		let start_viewport = (start_norm - self.uv_range.min) / uv_size;
-		let end_viewport = (end_norm - self.uv_range.min) / uv_size;
+		let start_viewport = self.uv_range.map_to_percentage(start_norm);
+		let end_viewport = self.uv_range.map_to_percentage(end_norm);
 
-		let start_widget = start_viewport * self.widget_size + self.widget_start;
-		let end_widget = end_viewport * self.widget_size + self.widget_start;
+		let start_widget = self.widget_bounds.map_from_percentage(start_viewport);
+		let end_widget = self.widget_bounds.map_from_percentage(end_viewport);
 
-		self.draw_list.with_clip_rect_intersect(self.widget_start.to_array(), self.widget_end.to_array(), || {
+		self.draw_list.with_clip_rect_intersect(self.widget_bounds.min.to_array(), self.widget_bounds.max.to_array(), || {
 			self.draw_list.add_rect(start_widget.to_array(), end_widget.to_array(), color.to_tuple()).build();
 		});
 	}
@@ -292,9 +285,8 @@ impl TextureCanvas<'_> {
 
 		let mouse_pos = self.ui.io().mouse_pos;
 
-		let diff = Vec2::from(mouse_pos) - self.widget_start;
-		let hovered_pixel = (diff * TEX_SIZE / self.widget_size).to_vec2i();
-		Some(hovered_pixel)
+		let hovered_pixel = self.widget_bounds.map_to_percentage(Vec2::from(mouse_pos)) * TEX_SIZE;
+		Some(hovered_pixel.to_vec2i())
 	}
 
 	pub fn hovered_cell(&self) -> Option<Vec2i> {
