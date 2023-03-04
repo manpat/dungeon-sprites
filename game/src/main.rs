@@ -1,6 +1,8 @@
 #![feature(let_chains)]
 
 use toybox::prelude::*;
+use serde::{Serialize, Deserialize};
+
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
 	std::env::set_var("RUST_BACKTRACE", "1");
@@ -87,14 +89,14 @@ pub fn load_texture(gfx: &mut gfx::ResourceContext<'_>, path: impl AsRef<Path>) 
 
 #[derive(Default)]
 pub struct SpriteEditorState {
-	selected_cell_begin: Vec2i,
-	selected_cell_end: Vec2i,
+	selected_cells: Aabb2i,
+	drag_start_cell: Vec2i,
 
 	preview_background: Color,
 }
 
 
-#[derive(Default)]
+#[derive(Default, Serialize, Deserialize)]
 pub struct Sprite {
 	name: String,
 
@@ -111,33 +113,33 @@ pub fn ui_atlas_editor(ui: &imgui::Ui<'_>, atlas: gfx::TextureKey, state: &mut S
 	canvas.draw_texture();
 
 	// Draw Selection
-	canvas.draw_cell_rect(state.selected_cell_begin, state.selected_cell_end, Color::rgb(1.0, 0.2, 0.2));
+	canvas.draw_cell_rect(state.selected_cells, Color::rgb(1.0, 0.2, 0.2));
 
 	let Some(hovered_cell) = canvas.hovered_cell() else {
 		return
 	};
 
+	let hovered_cell_range = Aabb2i::from_min_point(hovered_cell, Vec2i::splat(1));
+
 	if ui.is_item_clicked() {
-		state.selected_cell_begin = hovered_cell;
-		state.selected_cell_end = hovered_cell + Vec2i::splat(1);
+		state.drag_start_cell = hovered_cell;
+		state.selected_cells = hovered_cell_range;
 	}
 
 	if ui.is_mouse_dragging(imgui::MouseButton::Left) {
-		let Vec2i{x, y} = hovered_cell - state.selected_cell_begin + Vec2i::splat(1);
-		let cell_delta = Vec2i::new(x.max(1), y.max(1));
-
-		state.selected_cell_end = state.selected_cell_begin + cell_delta;
+		let start_range = Aabb2i::from_min_point(state.drag_start_cell, Vec2i::splat(1));
+		state.selected_cells = start_range.union(&hovered_cell_range);
 	}
 
 	// Draw hovered cell
-	canvas.draw_cell_rect(hovered_cell, hovered_cell + Vec2i::splat(1), Color::grey_a(1.0, 0.5));
+	canvas.draw_cell_rect(hovered_cell_range, Color::grey_a(1.0, 0.5));
 }
 
 
 pub fn ui_sprite_basic_preview(ui: &imgui::Ui<'_>, atlas: gfx::TextureKey, state: &SpriteEditorState) {
 	let canvas = TextureCanvasBuilder::new(atlas)
 		.widget_size(Vec2::splat(300.0))
-		.display_range(state.selected_cell_begin * 16, state.selected_cell_end * 16)
+		.display_range(state.selected_cells.scale(16))
 		.build(ui);
 
 	canvas.fill(state.preview_background);
@@ -157,7 +159,7 @@ const TEX_SIZE: f32 = 128.0;
 pub struct TextureCanvasBuilder {
 	atlas: gfx::TextureKey,
 	widget_size: Option<Vec2>,
-	display_range: Option<(Vec2i, Vec2i)>,
+	display_range: Option<Aabb2i>,
 }
 
 impl TextureCanvasBuilder {
@@ -174,15 +176,15 @@ impl TextureCanvasBuilder {
 		self
 	}
 
-	pub fn display_range(mut self, start: Vec2i, end: Vec2i) -> Self {
-		self.display_range = Some((start, end));
+	pub fn display_range(mut self, range: Aabb2i) -> Self {
+		self.display_range = Some(range);
 		self
 	}
 
 	pub fn build<'imgui>(self, ui: &'imgui imgui::Ui<'_>) -> TextureCanvas<'imgui> {
-		let (uv_start, uv_end) = match self.display_range {
-			Some((start, end)) => (start.to_vec2() / TEX_SIZE, end.to_vec2() / TEX_SIZE),
-			None => (Vec2::zero(), Vec2::splat(1.0)),
+		let uv_range = match self.display_range {
+			Some(pixel_range) => pixel_range.to_aabb2().scale(1.0/TEX_SIZE),
+			None => Aabb2::new(Vec2::zero(), Vec2::splat(1.0)),
 		};
 
 		// let aspect = ...
@@ -210,8 +212,7 @@ impl TextureCanvasBuilder {
 			widget_end,
 			widget_size,
 
-			uv_start,
-			uv_end,
+			uv_range,
 		}
 	}
 }
@@ -228,13 +229,12 @@ pub struct TextureCanvas<'imgui> {
 	widget_end: Vec2,
 	widget_size: Vec2,
 	
-	uv_start: Vec2,
-	uv_end: Vec2,
+	uv_range: Aabb2,
 }
 
 impl TextureCanvas<'_> {
 	pub fn is_empty(&self) -> bool {
-		let Vec2{x, y} = self.uv_end - self.uv_start;
+		let Vec2{x, y} = self.uv_range.size();
 		x < 0.001 || y < 0.001
 	}
 
@@ -254,28 +254,28 @@ impl TextureCanvas<'_> {
 
 		let texture_id = toybox::imgui_backend::texture_key_to_imgui_id(self.atlas);
 		self.draw_list.add_image(texture_id, self.widget_start.to_array(), self.widget_end.to_array())
-			.uv_min(flip_y(self.uv_start).to_array())
-			.uv_max(flip_y(self.uv_end).to_array())
+			.uv_min(flip_y(self.uv_range.min).to_array())
+			.uv_max(flip_y(self.uv_range.max).to_array())
 			.build();
 	}
 
-	pub fn draw_cell_rect(&self, start_cell: Vec2i, end_cell: Vec2i, color: impl Into<Color>) {
-		self.draw_pixel_rect(start_cell * 16, end_cell * 16, color);
+	pub fn draw_cell_rect(&self, cell_range: Aabb2i, color: impl Into<Color>) {
+		self.draw_pixel_rect(Aabb2i::new(cell_range.min * 16, cell_range.max * 16), color);
 	}
 
-	pub fn draw_pixel_rect(&self, start_px: Vec2i, end_px: Vec2i, color: impl Into<Color>) {
-		if start_px == end_px {
+	pub fn draw_pixel_rect(&self, pixel_range: Aabb2i, color: impl Into<Color>) {
+		if pixel_range.is_empty() {
 			return;
 		}
 
 		let color = color.into();
 
-		let start_norm = start_px.to_vec2() / TEX_SIZE;
-		let end_norm = end_px.to_vec2() / TEX_SIZE;
+		let start_norm = pixel_range.min.to_vec2() / TEX_SIZE;
+		let end_norm = pixel_range.max.to_vec2() / TEX_SIZE;
 
-		let uv_size = self.uv_end - self.uv_start;
-		let start_viewport = (start_norm - self.uv_start) / uv_size;
-		let end_viewport = (end_norm - self.uv_start) / uv_size;
+		let uv_size = self.uv_range.size();
+		let start_viewport = (start_norm - self.uv_range.min) / uv_size;
+		let end_viewport = (end_norm - self.uv_range.min) / uv_size;
 
 		let start_widget = start_viewport * self.widget_size + self.widget_start;
 		let end_widget = end_viewport * self.widget_size + self.widget_start;
