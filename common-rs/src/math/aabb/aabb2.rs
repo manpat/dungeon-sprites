@@ -43,5 +43,13 @@ impl Aabb2 {
 	pub fn size(&self) -> Vec2 {
 		self.max - self.min
 	}
+
+	pub fn map_to_percentage(&self, p: Vec2) -> Vec2 {
+		(p - self.min) / self.size()
+	}
+
+	pub fn map_from_percentage(&self, p: Vec2) -> Vec2 {
+		p * self.size() + self.min
+	}
 }
 
